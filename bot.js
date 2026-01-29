@@ -214,5 +214,20 @@ bot.action(/cat_(.+)/, async (ctx) => {
     if (!d) return ctx.reply("⌛ Expirou.");
     try {
         await salvarGasto(d.uid, d, ctx.match[1]);
-        ctx.editMessageText(`✅ Salvo:
+        ctx.editMessageText(`✅ Salvo: R$ ${d.amount.toFixed(2)}`);
+    } catch (e) {
+        ctx.reply("Erro ao salvar.");
+    }
+    delete session[ctx.chat.id];
+});
 
+// Tratamento de Erro Global (Para não derrubar o bot)
+bot.catch((err) => {
+    console.error("Erro no Bot:", err);
+});
+
+bot.launch();
+
+// Encerramento seguro
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
