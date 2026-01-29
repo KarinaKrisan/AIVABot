@@ -23,7 +23,7 @@ const session = {};
 
 // --- 3. FUNÇÕES AUXILIARES ---
 
-// Pega a data de hoje no formato YYYY-MM-DD (Padrão do App)
+// Pega a data de hoje no formato YYYY-MM-DD
 function getHoje() {
     return new Date().toISOString().split('T')[0];
 }
@@ -81,7 +81,7 @@ async function buscarPorChatId(chatId) {
     return null;
 }
 
-// Salvar Gasto (Com correção de Data)
+// Salvar Gasto
 async function salvarGasto(uid, data, categoria) {
     const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/users/${uid}/transactions?key=${FIREBASE_KEY}`;
     const body = {
@@ -90,15 +90,15 @@ async function salvarGasto(uid, data, categoria) {
             amount: { doubleValue: data.amount },
             description: { stringValue: data.description },
             category: { stringValue: categoria },
-            date: { stringValue: getHoje() }, // Data simples para o filtro do App
-            dateISO: { stringValue: new Date().toISOString() }, // Data completa para ordenação
+            date: { stringValue: getHoje() },
+            dateISO: { stringValue: new Date().toISOString() },
             createdAt: { timestampValue: new Date().toISOString() }
         }
     };
     await axios.post(url, body);
 }
 
-// Salvar Renda (Com correção de Data)
+// Salvar Renda
 async function salvarRenda(uid, data) {
     const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/users/${uid}/transactions?key=${FIREBASE_KEY}`;
     const body = {
@@ -154,7 +154,6 @@ bot.on('photo', async (ctx) => {
         const res = await axios.post('https://api.ocr.space/parse/image', form, { headers: form.getHeaders() });
         const text = res.data.ParsedResults?.[0]?.ParsedText || "";
         
-        // Regex melhorado para achar valores
         const valor = text.match(/(?:total|valor|pagar|r\$).*?(\d+[.,]\d{2})/i);
         
         if (valor) {
@@ -175,7 +174,7 @@ bot.on('photo', async (ctx) => {
     }
 });
 
-// Comando Gasto Manual
+// Gasto Manual
 bot.hears(/^(?:\/)?gasto/i, async (ctx) => {
     const user = await buscarPorChatId(ctx.chat.id);
     if (!user) return ctx.reply("🔒 Conecte-se primeiro.");
@@ -189,7 +188,7 @@ bot.hears(/^(?:\/)?gasto/i, async (ctx) => {
     ]));
 });
 
-// Comando Renda Manual
+// Renda Manual
 bot.hears(/^(?:\/)?(?:renda|ganho|entrada|recebimento)/i, async (ctx) => {
     const user = await buscarPorChatId(ctx.chat.id);
     if (!user) return ctx.reply("🔒 Conecte-se primeiro.");
@@ -221,13 +220,12 @@ bot.action(/cat_(.+)/, async (ctx) => {
     delete session[ctx.chat.id];
 });
 
-// Tratamento de Erro Global (Para não derrubar o bot)
+// Tratamento de Erro Global
 bot.catch((err) => {
     console.error("Erro no Bot:", err);
 });
 
 bot.launch();
 
-// Encerramento seguro
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
