@@ -2,13 +2,13 @@ require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const axios = require('axios');
 const FormData = require('form-data');
-const express = require('express'); // O Truque para o Render
+const express = require('express'); 
 
-// --- 1. O TRUQUE PARA O RENDER NÃO DESLIGAR ---
+// --- 1. SERVIDOR WEB (Para o Render ficar online) ---
 const app = express();
-app.get('/', (req, res) => res.send('🤖 Bot AIVA está Online e Operante!'));
+app.get('/', (req, res) => res.send('🤖 Bot AIVA Finance está Online!'));
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor Web rodando na porta ${PORT}`));
+app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
 
 console.log("🚀 Iniciando AIVA Bot...");
 
@@ -21,7 +21,7 @@ const OCR_KEY = "K85154282888957";
 const bot = new Telegraf(TOKEN);
 const session = {}; 
 
-// --- 3. FUNÇÕES (REST API) ---
+// --- 3. FUNÇÕES DE BANCO (REST API) ---
 
 async function buscarUsuario(codigo) {
     const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery?key=${FIREBASE_KEY}`;
@@ -89,6 +89,21 @@ async function salvarGasto(uid, data, categoria) {
     await axios.post(url, body);
 }
 
+async function salvarRenda(uid, data) {
+    const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/users/${uid}/transactions?key=${FIREBASE_KEY}`;
+    const body = {
+        fields: {
+            type: { stringValue: "income" },
+            amount: { doubleValue: data.amount },
+            description: { stringValue: data.description },
+            category: { stringValue: "renda" },
+            dateISO: { stringValue: new Date().toISOString() },
+            createdAt: { timestampValue: new Date().toISOString() }
+        }
+    };
+    await axios.post(url, body);
+}
+
 // --- 4. COMANDOS ---
 
 bot.start((ctx) => {
@@ -102,7 +117,7 @@ const conectar = async (ctx, codigo) => {
     
     if (userDoc) {
         await conectarNoBanco(userDoc.name, ctx.chat.id);
-        ctx.reply("✅ **Conectado!**\nAgora envie uma foto do comprovante ou digite: `gasto 50 mercado`", {parse_mode: 'Markdown'});
+        ctx.reply("✅ **Conectado!**\n\nTente:\n- `gasto 50 almoço`\n- `recebimento 2000 salário`\n- Envie uma foto de comprovante", {parse_mode: 'Markdown'});
     } else {
         ctx.reply("🚫 Código não encontrado. Verifique no site.");
     }
@@ -111,6 +126,7 @@ const conectar = async (ctx, codigo) => {
 bot.hears(/^\d{6}$/, (ctx) => conectar(ctx, ctx.message.text));
 bot.command('conectar', (ctx) => conectar(ctx, ctx.message.text.split(' ')[1]));
 
+// --- LEITURA DE FOTO (REGEX MELHORADO) ---
 bot.on('photo', async (ctx) => {
     const user = await buscarPorChatId(ctx.chat.id);
     if (!user) return ctx.reply("🔒 Envie o código de 6 números primeiro.");
@@ -122,24 +138,34 @@ bot.on('photo', async (ctx) => {
         form.append('url', link.href);
         form.append('language', 'por');
         form.append('apikey', OCR_KEY);
+        // Adiciona isTable=true para tentar ler melhor cupons fiscais
+        form.append('isTable', 'true'); 
         
         const res = await axios.post('https://api.ocr.space/parse/image', form, { headers: form.getHeaders() });
         const text = res.data.ParsedResults?.[0]?.ParsedText || "";
-        const valor = text.match(/(?:R\$|Total|Valor)\s?[:.]?\s?(\d+[.,]\d{2})/i);
+        
+        // NOVO REGEX: Mais flexível para encontrar o valor total
+        const valor = text.match(/(?:total|valor|pagar|r\$).*?(\d+[.,]\d{2})/i);
         
         if (valor) {
             const v = parseFloat(valor[1].replace(',', '.'));
             session[ctx.chat.id] = { uid: user.name.split('/').pop(), amount: v, description: 'Gasto (Foto)' };
             ctx.telegram.deleteMessage(ctx.chat.id, msg.message_id);
-            ctx.reply(`💰 R$ ${v}\nCategoria?`, Markup.inlineKeyboard([
-                [Markup.button.callback('🏠 Casa', 'cat_necessidades'), Markup.button.callback('🍔 Comida', 'cat_estilo')]
+            ctx.reply(`💰 R$ ${v.toFixed(2)}\nQual a categoria?`, Markup.inlineKeyboard([
+                [Markup.button.callback('🏠 Casa', 'cat_necessidades'), Markup.button.callback('🍔 Comida', 'cat_estilo')],
+                [Markup.button.callback('🚗 Transporte', 'cat_dividas'), Markup.button.callback('💳 Outros', 'cat_investimentos')]
             ]));
         } else {
-            ctx.reply("❓ Não entendi o valor. Tente digitar.");
+            ctx.telegram.deleteMessage(ctx.chat.id, msg.message_id);
+            ctx.reply("❓ Não consegui identificar o valor total. Tente digitar: `gasto 85 pizzaria`", {parse_mode: 'Markdown'});
         }
-    } catch (e) { ctx.reply("❌ Erro na leitura."); }
+    } catch (e) { 
+        console.error(e);
+        ctx.reply("❌ Erro técnico na leitura da imagem."); 
+    }
 });
 
+// --- COMANDO DE GASTO ---
 bot.hears(/^(?:\/)?gasto/i, async (ctx) => {
     const user = await buscarPorChatId(ctx.chat.id);
     if (!user) return ctx.reply("🔒 Conecte-se primeiro.");
@@ -147,16 +173,43 @@ bot.hears(/^(?:\/)?gasto/i, async (ctx) => {
     const valor = parseFloat(parts[1]?.replace(',', '.'));
     if (!valor) return ctx.reply("⚠️ Use: gasto 50 padaria");
     session[ctx.chat.id] = { uid: user.name.split('/').pop(), amount: valor, description: parts.slice(2).join(' ') || 'Gasto' };
-    ctx.reply(`💸 R$ ${valor} - Categoria?`, Markup.inlineKeyboard([
-        [Markup.button.callback('🏠 Casa', 'cat_necessidades'), Markup.button.callback('🍔 Comida', 'cat_estilo')]
+    ctx.reply(`💸 R$ ${valor.toFixed(2)} - Categoria?`, Markup.inlineKeyboard([
+        [Markup.button.callback('🏠 Casa', 'cat_necessidades'), Markup.button.callback('🍔 Comida', 'cat_estilo')],
+        [Markup.button.callback('🚗 Transporte', 'cat_dividas'), Markup.button.callback('💳 Outros', 'cat_investimentos')]
     ]));
 });
 
+// --- COMANDO DE RENDA ---
+bot.hears(/^(?:\/)?(?:renda|ganho|entrada|recebimento)/i, async (ctx) => {
+    const user = await buscarPorChatId(ctx.chat.id);
+    if (!user) return ctx.reply("🔒 Conecte-se primeiro.");
+    
+    const parts = ctx.message.text.split(' ');
+    const valor = parseFloat(parts[1]?.replace(',', '.'));
+    
+    if (!valor) return ctx.reply("⚠️ Formato inválido.\nUse: `recebimento 2000 salario`", {parse_mode: 'Markdown'});
+    
+    const uid = user.name.split('/').pop();
+    const descricao = parts.slice(2).join(' ') || 'Renda Extra';
+
+    try {
+        await salvarRenda(uid, { amount: valor, description: descricao });
+        ctx.reply(`💰 **Recebimento Confirmado!**\n+ R$ ${valor.toFixed(2)} (${descricao})`, {parse_mode: 'Markdown'});
+    } catch (e) {
+        ctx.reply("❌ Erro ao salvar o recebimento.");
+    }
+});
+
+// Salvar Categoria (Gasto)
 bot.action(/cat_(.+)/, async (ctx) => {
     const d = session[ctx.chat.id];
-    if (!d) return ctx.reply("⌛ Expirou.");
-    await salvarGasto(d.uid, d, ctx.match[1]);
-    ctx.editMessageText(`✅ Salvo: R$ ${d.amount}`);
+    if (!d) return ctx.reply("⌛ Expirou. Digite o gasto novamente.");
+    try {
+        await salvarGasto(d.uid, d, ctx.match[1]);
+        ctx.editMessageText(`✅ Salvo: R$ ${d.amount.toFixed(2)}`);
+    } catch (e) {
+        ctx.reply("Erro ao salvar.");
+    }
     delete session[ctx.chat.id];
 });
 
