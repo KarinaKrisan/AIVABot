@@ -215,3 +215,4 @@ bot.action(/cat_(.+)/, async (ctx) => {
     try {
         await salvarGasto(d.uid, d, ctx.match[1]);
         ctx.editMessageText(`✅ Salvo:
+
